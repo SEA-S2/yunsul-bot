@@ -2,9 +2,12 @@ name: 윤슬봇 일일 완료 작성
 
 on:
   schedule:
-    # GitHub Actions는 UTC 기준
-    # 15:20 UTC = 한국시간 00:20
+    # 한국 시간 00:20
     - cron: "20 15 * * *"
+
+    # 00:20 실행이 누락될 경우를 위한 한국 시간 00:37 백업
+    - cron: "37 15 * * *"
+
   workflow_dispatch:
 
 concurrency:
