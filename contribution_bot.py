@@ -2,6 +2,7 @@
 import os
 import sqlite3
 import tempfile
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -389,8 +390,8 @@ async def backup_database(interaction: discord.Interaction):
         # are occurring. The live database and existing records are untouched.
         with tempfile.TemporaryDirectory(prefix="yunsul_backup_") as tmpdir:
             backup_path = Path(tmpdir) / filename
-            with connect() as source:
-                with sqlite3.connect(backup_path) as destination:
+            with closing(connect()) as source:
+                with closing(sqlite3.connect(backup_path)) as destination:
                     source.backup(destination)
             size = backup_path.stat().st_size
             if size > 8 * 1024 * 1024:
