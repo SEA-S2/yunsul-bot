@@ -1,6 +1,8 @@
 """윤 슬 디스코드 납품·기여도 명령어 (기존 예약 게시 스크립트와 독립)."""
 import os
 import sqlite3
+import tempfile
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -368,6 +370,55 @@ class ResetAllView(discord.ui.View):
         for item in self.children:
             item.disabled = True
         await interaction.response.edit_message(content="✅ 전체초기화를 취소했어요. 데이터는 변경되지 않았습니다.", view=self)
+
+
+
+@bot.tree.command(name="백업", description="납품 데이터베이스 전체를 백업 파일로 내려받습니다. (관리자)")
+@app_commands.guild_only()
+async def backup_database(interaction: discord.Interaction):
+    if await deny_if_not_manager(interaction):
+        return
+
+    # Only the requesting administrator sees the file. Defer within Discord's
+    # interaction deadline, since a larger SQLite database may take time.
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_UTC")
+    filename = f"yunsul_backup_{stamp}.sqlite3"
+
+    try:
+        # SQLite online backup produces a consistent snapshot even if writes
+        # are occurring. The live database and existing records are untouched.
+        with tempfile.TemporaryDirectory(prefix="yunsul_backup_") as tmpdir:
+            backup_path = Path(tmpdir) / filename
+            with closing(connect()) as source:
+                with closing(sqlite3.connect(backup_path)) as destination:
+                    source.backup(destination)
+            size = backup_path.stat().st_size
+            if size > 8 * 1024 * 1024:
+                await interaction.followup.send(
+                    "⚠️ 백업 파일이 8MB를 넘어 디스코드에 안전하게 첨부할 수 없어요. "
+                    "Railway에서 파일을 따로 내려받아 주세요. 원본 데이터는 그대로 유지됩니다.",
+                    ephemeral=True,
+                )
+                return
+            with backup_path.open("rb") as backup_fp:
+                await interaction.followup.send(
+                    "💾 **윤 슬 납품 데이터 백업 완료**\\n"
+                    "첨부된 파일을 다운로드해 컴퓨터의 안전한 위치에 보관해 주세요. "
+                    "납품 기록·재료 설정·개인 목표·취소 이력이 모두 들어 있어요.\\n"
+                    "⚠️ 관리자 전용 파일이므로 타인에게 공유하지 마세요. "
+                    "디스코드에서 이 메시지가 사라지기 전에 꼭 저장해 주세요. "
+                    "백업 파일만으로 자동 복원되지는 않습니다.",
+                    file=discord.File(backup_fp, filename=filename),
+                    ephemeral=True,
+                )
+    except (sqlite3.Error, OSError, discord.HTTPException) as exc:
+        print(f"백업 실패: {type(exc).__name__}: {exc}")
+        await interaction.followup.send(
+            "❌ 백업 파일 생성 또는 전송에 실패했어요. Railway 로그를 확인해 주세요. "
+            "기존 데이터는 변경하지 않았습니다.",
+            ephemeral=True,
+        )
 
 
 @bot.tree.command(name="전체초기화", description="이 서버의 모든 납품 기록·목표·재료 설정을 삭제합니다. (관리자)")
