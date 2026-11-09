@@ -259,6 +259,143 @@ async def history(interaction: discord.Interaction, 마을원: discord.Member | 
     )
 
 
+@bot.tree.command(name="목표초기화", description="마을원의 개인 목표 설정을 초기화합니다. (관리자)")
+@app_commands.guild_only()
+async def reset_goal(interaction: discord.Interaction, 마을원: discord.Member):
+    if await deny_if_not_manager(interaction):
+        return
+    with connect() as db:
+        result = db.execute(
+            "DELETE FROM goals WHERE guild_id=? AND user_id=?",
+            (interaction.guild_id, 마을원.id),
+        )
+        removed = result.rowcount
+    if not removed:
+        return await reply_error(
+            interaction, f"{마을원.mention}은 별도로 설정된 목표가 없어요. 기본 목표는 {DEFAULT_GOAL:,}점입니다."
+        )
+    await interaction.response.send_message(
+        f"✅ {마을원.mention}의 개인 목표를 초기화했어요. 이제 기본 목표 **{DEFAULT_GOAL:,}점**이 적용됩니다. "
+        "기존 납품 기록은 유지돼요.",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="재료삭제", description="등록된 재료의 점수 설정을 삭제합니다. (관리자)")
+@app_commands.guild_only()
+async def delete_material(interaction: discord.Interaction, 재료: str):
+    if await deny_if_not_manager(interaction):
+        return
+    name = 재료.strip()
+    with connect() as db:
+        result = db.execute(
+            "DELETE FROM materials WHERE guild_id=? AND name=?",
+            (interaction.guild_id, name),
+        )
+        removed = result.rowcount
+    if not removed:
+        return await reply_error(interaction, "해당 이름으로 등록된 재료가 없어요.")
+    await interaction.response.send_message(
+        f"🗑️ **{discord.utils.escape_markdown(name)}** 재료 설정을 삭제했어요. "
+        "기존 납품 기록과 이미 적립된 점수는 유지됩니다. 다시 납품하려면 /재료설정이 필요해요.",
+        ephemeral=True,
+    )
+
+
+class ResetAllConfirm(discord.ui.Modal, title="윤 슬 전체 데이터 초기화 최종 확인"):
+    confirm = discord.ui.TextInput(
+        label="정확히 전체초기화 라고 입력하세요",
+        placeholder="전체초기화",
+        min_length=5,
+        max_length=5,
+        required=True,
+    )
+
+    def __init__(self, guild_id: int, requester_id: int):
+        super().__init__()
+        self.guild_id = guild_id
+        self.requester_id = requester_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if interaction.guild_id != self.guild_id or interaction.user.id != self.requester_id:
+            return await reply_error(interaction, "이 초기화 요청을 실행할 권한이 없어요.")
+        if await deny_if_not_manager(interaction):
+            return
+        if str(self.confirm.value).strip() != "전체초기화":
+            return await reply_error(interaction, "확인 문구가 일치하지 않아 아무것도 삭제하지 않았어요.")
+        with connect() as db:
+            records = db.execute(
+                "SELECT COUNT(*) FROM deliveries WHERE guild_id=?", (self.guild_id,),
+            ).fetchone()[0]
+            material_count = db.execute(
+                "SELECT COUNT(*) FROM materials WHERE guild_id=?", (self.guild_id,),
+            ).fetchone()[0]
+            goal_count = db.execute(
+                "SELECT COUNT(*) FROM goals WHERE guild_id=?", (self.guild_id,),
+            ).fetchone()[0]
+            db.execute("DELETE FROM deliveries WHERE guild_id=?", (self.guild_id,))
+            db.execute("DELETE FROM materials WHERE guild_id=?", (self.guild_id,))
+            db.execute("DELETE FROM goals WHERE guild_id=?", (self.guild_id,))
+        await interaction.response.send_message(
+            f"🗑️ 이 서버의 납품 기록 **{records:,}건**, 재료 설정 **{material_count:,}개**, "
+            f"개인 목표 설정 **{goal_count:,}개**를 모두 삭제했어요. "
+            f"개인 목표는 기본값 {DEFAULT_GOAL:,}점으로 돌아갑니다. 이 작업은 되돌릴 수 없어요.",
+            ephemeral=True,
+        )
+
+
+class ResetAllView(discord.ui.View):
+    def __init__(self, guild_id: int, requester_id: int):
+        super().__init__(timeout=180)
+        self.guild_id = guild_id
+        self.requester_id = requester_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.requester_id or interaction.guild_id != self.guild_id:
+            await reply_error(interaction, "이 확인 창은 명령어를 실행한 관리자만 사용할 수 있어요.")
+            return False
+        if await deny_if_not_manager(interaction):
+            return False
+        return True
+
+    @discord.ui.button(label="삭제 확인 문구 입력", style=discord.ButtonStyle.danger)
+    async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ResetAllConfirm(self.guild_id, self.requester_id))
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary)
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.stop()
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="✅ 전체초기화를 취소했어요. 데이터는 변경되지 않았습니다.", view=self)
+
+
+@bot.tree.command(name="전체초기화", description="이 서버의 모든 납품 기록·목표·재료 설정을 삭제합니다. (관리자)")
+@app_commands.guild_only()
+async def reset_all(interaction: discord.Interaction):
+    if await deny_if_not_manager(interaction):
+        return
+    with connect() as db:
+        records = db.execute(
+            "SELECT COUNT(*) FROM deliveries WHERE guild_id=?", (interaction.guild_id,),
+        ).fetchone()[0]
+        materials = db.execute(
+            "SELECT COUNT(*) FROM materials WHERE guild_id=?", (interaction.guild_id,),
+        ).fetchone()[0]
+        goals = db.execute(
+            "SELECT COUNT(*) FROM goals WHERE guild_id=?", (interaction.guild_id,),
+        ).fetchone()[0]
+    await interaction.response.send_message(
+        f"⚠️ **윤 슬 전체 초기화**\n"
+        f"이 서버의 납품 기록(취소 내역 포함) **{records:,}건**, 재료 **{materials:,}개**, "
+        f"개인 목표 **{goals:,}개**를 **영구 삭제**합니다.\n"
+        "마을원들의 기여도가 0점이 되고, 목표는 기본 1,000점으로 돌아갑니다. "
+        "복구할 수 없으니 정말 필요한 경우에만 진행하세요.",
+        view=ResetAllView(interaction.guild_id, interaction.user.id),
+        ephemeral=True,
+    )
+
+
 if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("환경변수 DISCORD_TOKEN이 필요합니다.")
