@@ -1,0 +1,20 @@
+name: 윤 슬 기여도 봇 코드 검사
+
+on:
+  pull_request:
+    paths:
+      - "contribution_bot.py"
+      - "requirements-contribution.txt"
+      - ".github/workflows/contribution-check.yml"
+  workflow_dispatch:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python 문법 검사
+        run: python -m py_compile contribution_bot.py
