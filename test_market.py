@@ -3,6 +3,8 @@ import unittest
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock
+from types import SimpleNamespace
+import discord
 
 import contribution_bot as c
 from market import Market, render, fresh, fingerprint
@@ -24,7 +26,7 @@ class MarketTests(unittest.IsolatedAsyncioTestCase):
         self.old = c.DB_PATH
         c.DB_PATH = Path(self.tmp.name)/'test.db'
         # 테스트마다 같은 전역 트리에 명령어가 중복 등록되지 않게 정리
-        for name in ['농부','어부','광부','요리사','연금','목수','시세설정','시세설정확인','고점기준']:
+        for name in ['농부','어부','광부','요리사','연금','목수','시세설정','시세설정확인','고점기준','시세채팅정리']:
             c.bot.tree.remove_command(name)
         self.market = Market(c.bot,c.connect,c.manager)
         self.market.poll.cancel()
@@ -86,6 +88,31 @@ class MarketTests(unittest.IsolatedAsyncioTestCase):
         self.market.emit=AsyncMock()
         await self.market.poll.coro(self.market)
         self.market.emit.assert_not_called()
+
+    async def test_cleanup_scope_bots_replies_and_permissions(self):
+        msg=SimpleNamespace(guild=SimpleNamespace(id=1,me=object()),
+            author=SimpleNamespace(bot=False),webhook_id=None,
+            type=discord.MessageType.default,interaction_metadata=None,delete=AsyncMock(),
+            channel=SimpleNamespace(id=123,permissions_for=lambda _:SimpleNamespace(manage_messages=True)))
+        await self.market.clean_message(msg)
+        msg.delete.assert_not_called()
+        with c.connect() as db:
+            db.execute('INSERT INTO market_cleanup VALUES(1,123)')
+        await self.market.clean_message(msg)
+        self.assertEqual(msg.delete.call_count,1)
+        msg.author.bot=True
+        await self.market.clean_message(msg)
+        self.assertEqual(msg.delete.call_count,1)
+        msg.author.bot=False
+        msg.type=discord.MessageType.reply
+        await self.market.clean_message(msg)
+        self.assertEqual(msg.delete.call_count,2)
+        msg.channel.permissions_for=lambda _:SimpleNamespace(manage_messages=False)
+        await self.market.clean_message(msg)
+        self.assertEqual(msg.delete.call_count,2)
+        msg.guild.id=2
+        await self.market.clean_message(msg)
+        self.assertEqual(msg.delete.call_count,2)
 
     async def test_long_list_pages_and_stable_digest(self):
         data=fixture()

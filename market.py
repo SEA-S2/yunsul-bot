@@ -101,8 +101,38 @@ class Market:
                 PRIMARY KEY(guild_id,job,event_key))''')
             db.execute('''CREATE TABLE IF NOT EXISTS market_baselines (
                 job TEXT PRIMARY KEY, digest TEXT NOT NULL, due TEXT)''')
+        with connect() as db:
+            db.execute('''CREATE TABLE IF NOT EXISTS market_cleanup (
+                guild_id INTEGER NOT NULL, channel_id INTEGER NOT NULL,
+                PRIMARY KEY(guild_id,channel_id))''')
+        self.bot.add_listener(self.clean_message, 'on_message')
         self.register()
         self.poll.start()
+
+    async def clean_message(self, message):
+        # 메시지 본문을 읽지 않으므로 Message Content Intent는 필요하지 않습니다.
+        if message.guild is None or message.author.bot or message.webhook_id:
+            return
+        if message.type not in (discord.MessageType.default, discord.MessageType.reply):
+            return
+        if getattr(message, 'interaction_metadata', None) is not None:
+            return
+        with self.connect() as db:
+            enabled = db.execute(
+                'SELECT 1 FROM market_cleanup WHERE guild_id=? AND channel_id=?',
+                (message.guild.id, message.channel.id),
+            ).fetchone()
+        if not enabled:
+            return
+        me = message.guild.me
+        if me is None or not message.channel.permissions_for(me).manage_messages:
+            return
+        try:
+            await message.delete()
+        except discord.NotFound:
+            pass
+        except discord.HTTPException:
+            log.warning('일반 메시지 삭제 실패: channel=%s', message.channel.id)
 
     async def fetch(self):
         async with self.lock:
@@ -168,6 +198,26 @@ class Market:
                     ON CONFLICT(guild_id,job) DO UPDATE SET channel_id=excluded.channel_id,enabled=excluded.enabled''',
                     (interaction.guild_id,직업,채널.id,int(알림)))
             await interaction.response.send_message(f"✅ {직업} 시세 채널: {채널.mention} · 알림 {'켜짐' if 알림 else '꺼짐'}\n알림을 켜면 갱신 10분 전 안내와 실제 갱신 후 시세를 게시합니다.", ephemeral=True)
+
+        @self.bot.tree.command(name='시세채팅정리', description='지정 채널의 일반 메시지만 자동 삭제합니다. (관리자)')
+        @app_commands.guild_only()
+        @app_commands.default_permissions(manage_guild=True)
+        async def cleanup(interaction: discord.Interaction, 채널: discord.TextChannel, 사용: bool):
+            if not self.is_manager(interaction):
+                return await interaction.response.send_message('서버 관리 권한이 필요합니다.', ephemeral=True)
+            perms = 채널.permissions_for(interaction.guild.me)
+            if 사용 and not (perms.view_channel and perms.manage_messages):
+                return await interaction.response.send_message(
+                    '봇에 해당 채널 보기·메시지 관리 권한을 허용한 뒤 다시 설정해 주세요.', ephemeral=True)
+            with self.connect() as db:
+                if 사용:
+                    db.execute('INSERT OR IGNORE INTO market_cleanup VALUES(?,?)', (interaction.guild_id, 채널.id))
+                else:
+                    db.execute('DELETE FROM market_cleanup WHERE guild_id=? AND channel_id=?', (interaction.guild_id, 채널.id))
+            await interaction.response.send_message(
+                f"✅ {채널.mention} 일반 메시지 자동 삭제 {'켜짐' if 사용 else '꺼짐'}\n"
+                '켜진 채널에서는 관리자 메시지·첨부파일도 삭제됩니다. 슬래시 명령어 응답과 봇 메시지는 유지합니다. 기존 메시지는 삭제하지 않습니다.',
+                ephemeral=True)
 
         @self.bot.tree.command(name='시세설정확인', description='직업별 시세 채널과 알림 설정을 확인합니다.')
         @app_commands.guild_only()
