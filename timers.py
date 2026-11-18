@@ -1,5 +1,6 @@
 """윤 슬 개인 타이머: 슬래시 입력, 영구 저장, 채널 멘션 알림."""
 import logging
+import re
 import sqlite3
 import time
 
@@ -45,6 +46,43 @@ def duration(kind, minutes, seconds):
     return value
 
 
+ALIASES = {'농부':'농사','ㄴㅂ':'농사','ㄴㅅ':'농사','ㅇㄹ':'요리','연금술사':'연금',
+           'ㅇㄱ':'연금','어부':'떡밥','ㄸㅂ':'떡밥','광부':'광부화로',
+           '해산물':'개척지해산물','광물':'개척지광물','나무':'개척지나무',
+           '향신료':'개척지향신료','약초':'개척지약초'}
+
+
+def parse_text(content):
+    text=content.strip()
+    if not text:
+        return None
+    if text in ('타이머','ㅌㅇㅁ','타이머 목록'):
+        return ('list',None,None)
+    if text in ('타이머 도움말','타이머 사용법'):
+        return ('help',None,None)
+    if text.startswith('타이머 취소 ') or text.startswith('취소 '):
+        name=text.split('취소 ',1)[1].strip()
+        return ('cancel',ALIASES.get(name,name),None)
+    first,*rest=text.split(maxsplit=1)
+    kind=ALIASES.get(first,first)
+    if kind not in PRESETS or kind=='직접설정':
+        return None
+    value=rest[0].strip() if rest else ''
+    if not value:
+        return ('start',kind,duration(kind,None,0))
+    match=re.fullmatch(r'(\d+)(?::([0-5]?\d)|분(?:\s*([0-5]?\d)초)?)?',value)
+    seconds_only=re.fullmatch(r'(\d+)초',value)
+    if match:
+        secs=duration(kind,int(match[1]),int(match[2] or match[3] or 0))
+    elif seconds_only:
+        secs=int(seconds_only[1])
+        if not 1<=secs<=604800:
+            raise ValueError('시간은 1초 이상 7일 이하로 입력해 주세요.')
+    else:
+        raise ValueError('예: `농사 16` (16분), `농사 16:30`, `요리 10초`')
+    return ('start',kind,secs)
+
+
 class TimerStore:
     def __init__(self, connect):
         self.connect = connect
@@ -84,7 +122,61 @@ class Timers:
         self.bot, self.connect, self.manager = bot, connect, manager
         self.store = TimerStore(connect)
         self.register()
+        self.bot.add_listener(self.on_message, "on_message")
         self.tick.start()
+
+    async def on_message(self, message):
+        if message.guild is None or message.author.bot or message.webhook_id:
+            return
+        if not isinstance(message.channel, discord.TextChannel):
+            return
+        with self.connect() as db:
+            row=db.execute('SELECT channel_id FROM timer_channels WHERE guild_id=?',(message.guild.id,)).fetchone()
+        if not row or message.channel.id!=row['channel_id']:
+            return
+        if not message.content.strip():
+            return
+        try:
+            parsed=parse_text(message.content)
+        except ValueError as exc:
+            await message.channel.send(str(exc),allowed_mentions=discord.AllowedMentions.none(),delete_after=15)
+            return
+        if parsed is None:
+            return
+        action,name,seconds=parsed
+        perms=message.channel.permissions_for(message.guild.me)
+        if not perms.send_messages:
+            return
+        if perms.manage_messages:
+            try:
+                await message.delete()
+            except discord.HTTPException:
+                pass
+        if action=='list':
+            rows=self.store.list(message.guild.id,message.author.id)
+            lines=[]
+            for r in rows:
+                remaining=max(0,int(r['due']-time.time()))
+                label=f'{remaining//60}분 {remaining%60}초 남음' if remaining else '완료 알림 대기'
+                lines.append(f"• {discord.utils.escape_markdown(r['name'])}: {label}")
+            text='⏰ **내 타이머**\n'+('\n'.join(lines) or '실행 중인 타이머가 없습니다.')
+        elif action=='cancel':
+            changed=self.store.cancel(message.guild.id,message.author.id,name)
+            text='✅ 내 타이머를 취소했습니다.' if changed else '해당 이름의 내 타이머가 없습니다.'
+        elif action=='help':
+            text='⏰ `떡밥` · `요리` · `연금` · `농사 16` · `개척지광물`\n`타이머`: 내 남은 시간 · `취소 농사`: 내 타이머 취소\n농사는 분/초 입력이 필요합니다. 숫자만 입력하면 분입니다. 같은 종류를 다시 입력하면 재시작합니다.\n자세한 종류는 `/타이머 도움말`을 확인해 주세요.'
+        else:
+            try:
+                due,replaced=self.store.start(message.guild.id,message.author.id,name,message.channel.id,seconds)
+            except ValueError as exc:
+                text=str(exc)
+            else:
+                text=f"⏰ **{name}** {'다시 시작' if replaced else '시작'} · {seconds//60}분 {seconds%60}초\n알림 예정: <t:{int(due)}:T>\n설정한 시간이 되면 본인을 태그합니다."
+                if len(message.content.split())==1:
+                    text+='\n'+PRESETS[name][1]
+        # 상태 응답은 사용자 표시만 하고 멘션은 완료 알림에서만 허용합니다.
+        display=discord.utils.escape_markdown(message.author.display_name)
+        await message.channel.send(f'**{display}**\n{text}',allowed_mentions=discord.AllowedMentions.none(),delete_after=30)
 
     def register(self):
         group = app_commands.Group(name='타이머', description='기린월드 개인 타이머 · 완료 시 채널에서 본인 멘션', guild_only=True)
@@ -160,6 +252,7 @@ class Timers:
         @group.command(name='도움말', description='기린 위키 기준 시간과 사용법을 확인합니다.')
         async def help_(interaction: discord.Interaction):
             lines=['**⏰ 윤 슬 개인 타이머**',
+                   '타이머 전용 채널: `떡밥`, `요리`, `농사 16`, `타이머`, `취소 농사`처럼 입력',
                    '`/타이머 시작` → 종류 선택 → 필요하면 분·초·이름 입력',
                    '`/타이머 목록` · `/타이머 취소 이름:…`',
                    '같은 이름은 재시작, 다른 이름은 별도 실행 (1인 최대 10개).',

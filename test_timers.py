@@ -3,10 +3,11 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
+import discord
 
 import contribution_bot as c
-from timers import Timers,TimerStore,duration
+from timers import Timers,TimerStore,duration,parse_text
 
 
 class TimerTests(unittest.IsolatedAsyncioTestCase):
@@ -81,6 +82,41 @@ class TimerTests(unittest.IsolatedAsyncioTestCase):
             channel.send.assert_not_called()
             self.assertEqual(len(self.timers.store.list(1,10)),1)
         finally:c.bot.get_guild=old
+
+    async def test_text_parsing(self):
+        self.assertEqual(parse_text('떡밥'),('start','떡밥',300))
+        self.assertEqual(parse_text('농부 16'),('start','농사',960))
+        self.assertEqual(parse_text('ㄴㅂ 16:30'),('start','농사',990))
+        self.assertEqual(parse_text('농사 16분 30초'),('start','농사',990))
+        self.assertEqual(parse_text('요리 10초'),('start','요리',10))
+        self.assertEqual(parse_text('타이머')[0],'list')
+        self.assertEqual(parse_text('취소 농부'),('cancel','농사',None))
+        self.assertIsNone(parse_text('안녕하세요'))
+        self.assertIsNone(parse_text(''))
+        with self.assertRaises(ValueError):parse_text('농사')
+        with self.assertRaises(ValueError):parse_text('요리 -3')
+
+    async def test_text_only_in_configured_timer_channel(self):
+        channel=MagicMock(spec=discord.TextChannel)
+        channel.id=123
+        channel.send=AsyncMock()
+        channel.permissions_for.return_value=SimpleNamespace(send_messages=True,manage_messages=True)
+        msg=SimpleNamespace(guild=SimpleNamespace(id=1,me=object()),
+            author=SimpleNamespace(id=10,bot=False,display_name='테스트'),
+            webhook_id=None,channel=channel,content='농사 16',delete=AsyncMock())
+        await self.timers.on_message(msg)
+        self.assertFalse(self.timers.store.list(1,10))
+        with c.connect() as db:db.execute('INSERT INTO timer_channels VALUES(1,123)')
+        await self.timers.on_message(msg)
+        self.assertEqual(len(self.timers.store.list(1,10)),1)
+        msg.delete.assert_awaited_once()
+        channel.send.assert_awaited_once()
+        msg.content='취소 농사'
+        await self.timers.on_message(msg)
+        self.assertFalse(self.timers.store.list(1,10))
+        msg.content='떡밥';msg.author.bot=True
+        await self.timers.on_message(msg)
+        self.assertFalse(self.timers.store.list(1,10))
 
     async def test_slash_group_registration(self):
         group=c.bot.tree.get_command('타이머')
