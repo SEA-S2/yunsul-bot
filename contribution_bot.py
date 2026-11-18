@@ -95,7 +95,9 @@ async def on_ready():
 @bot.event
 async def setup_hook():
     from market import Market
+    from timers import Timers
     bot.market = Market(bot, connect, manager)
+    bot.timers = Timers(bot, connect, manager)
     if GUILD_ID:
         guild = discord.Object(id=GUILD_ID)
         bot.tree.copy_global_to(guild=guild)

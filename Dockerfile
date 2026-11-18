@@ -3,5 +3,5 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY requirements-contribution.txt ./
 RUN pip install --no-cache-dir -r requirements-contribution.txt
-COPY contribution_bot.py market.py ./
+COPY contribution_bot.py market.py timers.py ./
 CMD ["python", "contribution_bot.py"]
