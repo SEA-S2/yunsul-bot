@@ -139,7 +139,7 @@ class Timers:
         try:
             parsed=parse_text(message.content)
         except ValueError as exc:
-            await message.channel.send(str(exc),allowed_mentions=discord.AllowedMentions.none(),delete_after=15)
+            await message.channel.send(str(exc),allowed_mentions=discord.AllowedMentions.none())
             return
         if parsed is None:
             return
@@ -176,7 +176,7 @@ class Timers:
                     text+='\n'+PRESETS[name][1]
         # 상태 응답은 사용자 표시만 하고 멘션은 완료 알림에서만 허용합니다.
         display=discord.utils.escape_markdown(message.author.display_name)
-        await message.channel.send(f'**{display}**\n{text}',allowed_mentions=discord.AllowedMentions.none(),delete_after=30)
+        await message.channel.send(f'**{display}**\n{text}',allowed_mentions=discord.AllowedMentions.none())
 
     def register(self):
         group = app_commands.Group(name='타이머', description='기린월드 개인 타이머 · 완료 시 채널에서 본인 멘션', guild_only=True)
