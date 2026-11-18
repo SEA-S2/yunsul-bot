@@ -85,6 +85,11 @@ class TimerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_text_parsing(self):
         self.assertEqual(parse_text('떡밥'),('start','떡밥',300))
+        self.assertEqual(parse_text('떡밥 3'),('start','떡밥',900))
+        self.assertEqual(parse_text('떡밥 3회'),('start','떡밥',900))
+        self.assertEqual(parse_text('떡밥 4번'),('start','떡밥',1200))
+        self.assertEqual(parse_text('떡밥 10분'),('start','떡밥',600))
+        with self.assertRaises(ValueError):parse_text('떡밥 0')
         self.assertEqual(parse_text('농부 16'),('start','농사',960))
         self.assertEqual(parse_text('ㄴㅂ 16:30'),('start','농사',990))
         self.assertEqual(parse_text('농사 16분 30초'),('start','농사',990))

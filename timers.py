@@ -70,6 +70,13 @@ def parse_text(content):
     value=rest[0].strip() if rest else ''
     if not value:
         return ('start',kind,duration(kind,None,0))
+    if kind=='떡밥':
+        count=re.fullmatch(r'(\d+)\s*(?:회|번|개)?',value)
+        if count:
+            count=int(count[1])
+            if not 1<=count<=2016:
+                raise ValueError('떡밥 횟수는 1~2016회로 입력해 주세요.')
+            return ('start',kind,count*300)
     match=re.fullmatch(r'(\d+)(?::([0-5]?\d)|분(?:\s*([0-5]?\d)초)?)?',value)
     seconds_only=re.fullmatch(r'(\d+)초',value)
     if match:
@@ -164,7 +171,7 @@ class Timers:
             changed=self.store.cancel(message.guild.id,message.author.id,name)
             text='✅ 내 타이머를 취소했습니다.' if changed else '해당 이름의 내 타이머가 없습니다.'
         elif action=='help':
-            text='⏰ `떡밥` · `요리` · `연금` · `농사 16` · `개척지광물`\n`타이머`: 내 남은 시간 · `취소 농사`: 내 타이머 취소\n농사는 분/초 입력이 필요합니다. 숫자만 입력하면 분입니다. 같은 종류를 다시 입력하면 재시작합니다.\n자세한 종류는 `/타이머 도움말`을 확인해 주세요.'
+            text='⏰ `떡밥 3` (3회·15분) · `요리` · `연금` · `농사 16` · `개척지광물`\n`타이머`: 내 남은 시간 · `취소 농사`: 내 타이머 취소\n농사는 분/초 입력이 필요합니다. 떡밥 숫자는 뿌린 횟수, 다른 타이머 숫자는 분입니다. 같은 종류를 다시 입력하면 재시작합니다.\n자세한 종류는 `/타이머 도움말`을 확인해 주세요.'
         else:
             try:
                 due,replaced=self.store.start(message.guild.id,message.author.id,name,message.channel.id,seconds)
@@ -255,6 +262,7 @@ class Timers:
                    '타이머 전용 채널: `떡밥`, `요리`, `농사 16`, `타이머`, `취소 농사`처럼 입력',
                    '`/타이머 시작` → 종류 선택 → 필요하면 분·초·이름 입력',
                    '`/타이머 목록` · `/타이머 취소 이름:…`',
+                   '떡밥: `떡밥 3` 또는 `떡밥 3회` → 15분. `떡밥 10분`은 직접 남은 시간 설정. 입력 시점부터 계산하며 기존 시간에 더하지 않습니다.',
                    '같은 이름은 재시작, 다른 이름은 별도 실행 (1인 최대 10개).',
                    '농사는 분·초 직접 입력이 필요합니다. 예: `/타이머 시작 종류:농사 분:16`은 사용자가 16분을 지정하는 예시이며 기린 고정 시간이 아닙니다.',
                    '요리·연금은 1회 기본 시간으로 실제 버프·숙련도·대기열 시간을 반영하지 않습니다.',
