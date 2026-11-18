@@ -90,6 +90,49 @@ def parse_text(content):
     return ('start',kind,secs)
 
 
+def timer_help():
+    return """⏰ **윤슬 봇 타이머 사용법**
+타이머 채널에 `/` 없이 아래처럼 입력해 주세요.
+
+**🍥 떡밥 — 뿌린 횟수로 입력**
+`떡밥` → 1회 · 5분
+`떡밥 2` → 2회 · 10분
+`떡밥 3` 또는 `떡밥 3회` → 3회 · 15분
+남은 시간을 직접 정하려면 `떡밥 10분`
+
+**🌱 농사 — 시간을 직접 입력**
+`농사 16` → 지금부터 16분
+`농사 16:30` → 16분 30초
+※ 16분은 입력 예시이며, 실제 작물 시간에 맞춰 주세요.
+
+**🍳 요리 · ⚗️ 연금 — 기본 시간**
+`요리` → 1분 26초
+`간단요리` → 30초 (감자 수프·호박죽 등)
+`연금` → 약 56초 · `바닐라비약` → 약 30초
+실제 시간이 다르면 `요리 40초`처럼 직접 지정해 주세요.
+
+**💧 스프링클러 — 물을 가득 채운 기준**
+`구리스프링클러` → 약 12분
+`강철스프링클러` → 약 18분
+`황금스프링클러` → 약 30분
+`네더스프링클러` → 약 45분
+
+**🌿 개척지 — 채집한 자리의 재생성**
+`개척지해산물` → 약 2분 · `개척지광물` → 약 7분 30초
+`개척지나무` · `개척지향신료` → 약 2분 30초
+`개척지약초` → 약 5분
+
+**📋 확인 · 취소**
+`타이머` → 내 남은 시간 확인
+`취소 떡밥` · `취소 농사` → 해당 타이머 취소
+`타이머 도움말` → 이 안내 다시 보기
+
+• 완료되면 이 채널에서 본인을 태그합니다.
+• 다시 입력하면 **지금부터 새 시간으로 재시작**합니다. 기존 시간에 더하지 않습니다.
+• 요리·연금은 시간 감소 전 1회 기본값입니다. 게임 상태와 자동 연동하지 않습니다.
+• 슬래시 `/타이머 시작` · `/타이머 목록` · `/타이머 취소`도 사용할 수 있습니다."""
+
+
 class TimerStore:
     def __init__(self, connect):
         self.connect = connect
@@ -171,7 +214,7 @@ class Timers:
             changed=self.store.cancel(message.guild.id,message.author.id,name)
             text='✅ 내 타이머를 취소했습니다.' if changed else '해당 이름의 내 타이머가 없습니다.'
         elif action=='help':
-            text='⏰ `떡밥 3` (3회·15분) · `요리` · `연금` · `농사 16` · `개척지광물`\n`타이머`: 내 남은 시간 · `취소 농사`: 내 타이머 취소\n농사는 분/초 입력이 필요합니다. 떡밥 숫자는 뿌린 횟수, 다른 타이머 숫자는 분입니다. 같은 종류를 다시 입력하면 재시작합니다.\n자세한 종류는 `/타이머 도움말`을 확인해 주세요.'
+            text=timer_help()
         else:
             try:
                 due,replaced=self.store.start(message.guild.id,message.author.id,name,message.channel.id,seconds)
@@ -258,22 +301,7 @@ class Timers:
 
         @group.command(name='도움말', description='기린 위키 기준 시간과 사용법을 확인합니다.')
         async def help_(interaction: discord.Interaction):
-            lines=['**⏰ 윤 슬 개인 타이머**',
-                   '타이머 전용 채널: `떡밥`, `요리`, `농사 16`, `타이머`, `취소 농사`처럼 입력',
-                   '`/타이머 시작` → 종류 선택 → 필요하면 분·초·이름 입력',
-                   '`/타이머 목록` · `/타이머 취소 이름:…`',
-                   '떡밥: `떡밥 3` 또는 `떡밥 3회` → 15분. `떡밥 10분`은 직접 남은 시간 설정. 입력 시점부터 계산하며 기존 시간에 더하지 않습니다.',
-                   '같은 이름은 재시작, 다른 이름은 별도 실행 (1인 최대 10개).',
-                   '농사는 분·초 직접 입력이 필요합니다. 예: `/타이머 시작 종류:농사 분:16`은 사용자가 16분을 지정하는 예시이며 기린 고정 시간이 아닙니다.',
-                   '요리·연금은 1회 기본 시간으로 실제 버프·숙련도·대기열 시간을 반영하지 않습니다.',
-                   '스프링클러는 가득 채운 기준, 개척지 재생성은 근삿값입니다.',
-                   '디스코드 타이머는 로그아웃 중에도 흐릅니다. 게임 제작 정지와 자동 동기화되지 않습니다.',
-                   '']
-            for name,(seconds,note,path) in PRESETS.items():
-                if seconds:
-                    lines.append(f'• {name}: {seconds//60}분 {seconds%60}초')
-            lines+=['',f'[농사 위키]({WIKI}life/proficiency/farmer/crops) · [요리 위키]({WIKI}life/proficiency/cook) · [연금 위키]({WIKI}life/proficiency/alchemist) · [개척지 위키]({WIKI}life/frontier)']
-            await interaction.response.send_message('\n'.join(lines),ephemeral=True)
+            await interaction.response.send_message(timer_help(),ephemeral=True, suppress_embeds=True)
         self.bot.tree.add_command(group)
 
     @tasks.loop(seconds=5)
