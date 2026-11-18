@@ -124,7 +124,7 @@ class Timers:
             safe_name=discord.utils.escape_markdown(name)
             await interaction.response.send_message(
                 f"⏰ **{safe_name}** {'다시 시작' if replaced else '시작'} · {seconds//60}분 {seconds%60}초\n"
-                f"완료: <t:{int(due)}:R> · 알림 채널: {channel.mention}\n{note}\n"
+                f"알림 예정: <t:{int(due)}:T> · 알림 채널: {channel.mention}\n{note}\n"
                 '게임 상태와 자동 연동하지 않습니다. 완료 시 한 번만 알립니다.',ephemeral=True)
 
         @group.command(name='목록', description='내 타이머와 남은 시간을 확인합니다.')
@@ -167,7 +167,7 @@ class Timers:
                    '요리·연금은 1회 기본 시간으로 실제 버프·숙련도·대기열 시간을 반영하지 않습니다.',
                    '스프링클러는 가득 채운 기준, 개척지 재생성은 근삿값입니다.',
                    '디스코드 타이머는 로그아웃 중에도 흐릅니다. 게임 제작 정지와 자동 동기화되지 않습니다.',
-                   '동글의 호감도 6시간·다이버 1시간은 기린 근거를 확인하지 못해 넣지 않았습니다.','']
+                   '']
             for name,(seconds,note,path) in PRESETS.items():
                 if seconds:
                     lines.append(f'• {name}: {seconds//60}분 {seconds%60}초')
