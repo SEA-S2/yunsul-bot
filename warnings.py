@@ -172,8 +172,11 @@ class Warnings:
                         횟수: app_commands.Range[int, 1, 10] = 1):
             if not self.is_manager(interaction):
                 return await interaction.response.send_message("관리자 역할 이상만 사용할 수 있어요.",ephemeral=True)
-            if 횟수 > 1 and not self.is_mayor(interaction):
-                return await interaction.response.send_message("경고 2회 이상 부여는 마을장만 가능해요.",ephemeral=True)
+            if not self.is_mayor(interaction):
+                existing, _ = self.store.get(interaction.guild_id, 대상.id)
+                if 횟수 > 1 or existing >= 1:
+                    return await interaction.response.send_message(
+                        "누적 경고가 2회 이상이 되는 경우에는 마을장의 사전 승인이 필요해요.", ephemeral=True)
             if 대상.bot or 대상.id == interaction.guild.owner_id:
                 return await interaction.response.send_message("이 대상에게는 경고를 부여할 수 없어요.",ephemeral=True)
             사유 = 사유.strip()
