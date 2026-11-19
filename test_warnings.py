@@ -1,7 +1,7 @@
 """Standard-library tests for the persistent warning decay rules.
 
 The store class is extracted with ast so no Discord login or dependencies are needed.
-Run: python -m unittest test_warnings.py
+Run: python -m unittest test_warning_manager.py
 """
 import ast
 import sqlite3
@@ -10,11 +10,11 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-source = ast.parse((ROOT / "warnings.py").read_text(encoding="utf-8"))
+source = ast.parse((ROOT / "warning_manager.py").read_text(encoding="utf-8"))
 store_class = next(node for node in source.body
                    if isinstance(node, ast.ClassDef) and node.name == "WarningStore")
 ns = {"sqlite3": sqlite3, "time": __import__("time"), "PERIOD": 30 * 86400}
-exec(compile(ast.Module(body=[store_class], type_ignores=[]), str(ROOT / "warnings.py"), "exec"), ns)
+exec(compile(ast.Module(body=[store_class], type_ignores=[]), str(ROOT / "warning_manager.py"), "exec"), ns)
 WarningStore = ns["WarningStore"]
 DAY = 86400
 
