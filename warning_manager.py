@@ -74,7 +74,7 @@ class WarningStore:
             db.execute("BEGIN IMMEDIATE")
             return self._decay(db, now)
 
-    def change(self, guild, user, actor, delta, reason, event_type, now=None):
+    def change(self, guild, user, actor, delta, reason, event_type, now=None, max_total=None):
         now = time.time() if now is None else now
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -86,6 +86,8 @@ class WarningStore:
             if delta < 0 and previous < -delta:
                 raise ValueError(f"현재 경고는 {previous}회라 {abs(delta)}회를 차감할 수 없어요.")
             new_count = previous + delta
+            if max_total is not None and new_count > max_total:
+                raise ValueError(f"관리자는 누적 경고 {max_total}회까지만 부여할 수 있어요. 3회부터는 마을장 승인이 필요합니다.")
             if new_count == 0:
                 due = None
             elif previous == 0:
@@ -165,25 +167,26 @@ class Warnings:
     def register(self):
         group = app_commands.Group(name="경고", description="윤 슬 경고 부여·조회·30일 자동 차감")
 
-        @group.command(name="부여", description="마을원에게 경고를 부여합니다. 관리자 1회, 마을장은 여러 회 가능.")
+        @group.command(name="부여", description="마을원에게 경고를 부여합니다. 관리자 누적 2회까지, 3회 이상은 마을장 전용.")
         @app_commands.guild_only()
         @app_commands.describe(대상="경고를 받을 마을원", 사유="경고 사유", 횟수="부여할 경고 횟수 (기본 1)")
         async def grant(interaction: discord.Interaction, 대상: discord.Member, 사유: str,
                         횟수: app_commands.Range[int, 1, 10] = 1):
             if not self.is_manager(interaction):
                 return await interaction.response.send_message("관리자 역할 이상만 사용할 수 있어요.",ephemeral=True)
-            if not self.is_mayor(interaction):
-                existing, _ = self.store.get(interaction.guild_id, 대상.id)
-                if 횟수 > 1 or existing >= 1:
-                    return await interaction.response.send_message(
-                        "누적 경고가 2회 이상이 되는 경우에는 마을장의 사전 승인이 필요해요.", ephemeral=True)
             if 대상.bot or 대상.id == interaction.guild.owner_id:
                 return await interaction.response.send_message("이 대상에게는 경고를 부여할 수 없어요.",ephemeral=True)
             사유 = 사유.strip()
             if not 1 <= len(사유) <= 400:
                 return await interaction.response.send_message("사유는 1~400자로 입력해 주세요.",ephemeral=True)
-            count, due = self.store.change(interaction.guild_id,대상.id,interaction.user.id,
-                                           횟수,사유,"grant")
+            try:
+                count, due = self.store.change(
+                    interaction.guild_id, 대상.id, interaction.user.id,
+                    횟수, 사유, "grant",
+                    max_total=None if self.is_mayor(interaction) else 2,
+                )
+            except ValueError as exc:
+                return await interaction.response.send_message(str(exc), ephemeral=True)
             await interaction.response.send_message(
                 f"✅ {대상.mention} 경고 **+{횟수}회** (누적 **{count}회**)\n"
                 f"사유: {discord.utils.escape_markdown(사유)}\n다음 차감일: {display_time(due)}"
