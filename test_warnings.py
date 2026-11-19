@@ -68,6 +68,26 @@ class WarningStoreTests(unittest.TestCase):
             self.store.change(1, 10, 20, -2, "취소", "revoke", 101 * DAY)
         self.assertEqual(self.store.get(1, 10, 101 * DAY)[0], 1)
 
+    def test_manager_can_grant_until_two_but_not_three(self):
+        first = 100 * DAY
+        self.assertEqual(
+            self.store.change(1, 10, 20, 2, "직업 무단 변경", "grant", first, max_total=2),
+            (2, first + 30 * DAY))
+        with self.assertRaisesRegex(ValueError, "3회부터"):
+            self.store.change(1, 10, 20, 1, "추가 경고", "grant", first + DAY, max_total=2)
+        self.assertEqual(self.store.get(1, 10, first + DAY), (2, first + 30 * DAY))
+        # Mayor may add a third without resetting the existing decay date.
+        self.assertEqual(
+            self.store.change(1, 10, 99, 1, "마을장 승인", "grant", first + DAY),
+            (3, first + 30 * DAY))
+
+    def test_manager_can_add_second_warning_to_existing_one(self):
+        first = 100 * DAY
+        self.store.change(1, 10, 20, 1, "첫 경고", "grant", first, max_total=2)
+        self.assertEqual(
+            self.store.change(1, 10, 20, 1, "두 번째", "grant", first + 5 * DAY, max_total=2),
+            (2, first + 30 * DAY))
+
     def test_guild_data_is_separate(self):
         self.store.change(1, 10, 20, 1, "위반", "grant", 100 * DAY)
         self.assertEqual(self.store.get(2, 10, 101 * DAY), (0, None))
