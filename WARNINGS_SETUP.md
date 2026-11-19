@@ -39,6 +39,6 @@ Railway Volume이 `/data`에 계속 마운트되어 있는지 확인하세요.
 5. 기존 경고를 윤슬봇에 수동 이관할 경우 첫 경고 시각이 새 시각으로 잡히므로 **정확한 과거 차감일을 유지하려면 별도 데이터 이관 작업**이 필요합니다.
 
 ## 검증
-`python -m unittest -v test_warning_manager.py`
+`python -m unittest -v test_warnings.py`
 
 테스트에서는 다른 기능과 별도 SQLite 파일을 사용합니다. PR 워크플로에서도 같은 검증을 실행합니다.
