@@ -3,8 +3,8 @@ name: Warning decay tests
 on:
   pull_request:
     paths:
-      - "warnings.py"
-      - "test_warnings.py"
+      - "warning_manager.py"
+      - "test_warning_manager.py"
       - ".github/workflows/test-warnings.yml"
   workflow_dispatch:
 
@@ -17,6 +17,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Test warning store (no Discord token needed)
-        run: python -m unittest -v test_warnings.py
+        run: python -m unittest -v test_warning_manager.py
       - name: Check syntax
-        run: python -m py_compile warnings.py contribution_bot.py
+        run: python -m py_compile warning_manager.py contribution_bot.py
