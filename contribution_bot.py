@@ -97,8 +97,10 @@ async def on_ready():
 async def setup_hook():
     from market import Market
     from timers import Timers
+    from warning_manager import Warnings
     bot.market = Market(bot, connect, manager)
     bot.timers = Timers(bot, connect, manager)
+    bot.warnings = Warnings(bot, connect)
     if GUILD_ID:
         guild = discord.Object(id=GUILD_ID)
         bot.tree.copy_global_to(guild=guild)
