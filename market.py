@@ -17,6 +17,7 @@ JOBS = {'농부': '농부 상점', '어부': '어부 상점', '광부': '광부 
         '요리사': '요리사 상점', '연금': '연금술사 상점', '목수': '목수 상점'}
 ALIASES = {'연금': {'연금 상점', '연금술사 상점'}, '요리사': {'요리 상점', '요리사 상점'}}
 log = logging.getLogger(__name__)
+UPDATE_GRACE = timedelta(minutes=2)  # 사이트 반영 지연을 기다린 뒤 경고합니다.
 
 
 def moment(value):
@@ -24,11 +25,26 @@ def moment(value):
     return dt.replace(tzinfo=KST) if dt.tzinfo is None else dt
 
 
-def fresh(data, now=None):
+def next_change(data, job=None):
+    due = []
+    for shop in data.get('shops', []):
+        if job is not None and not matching(job, shop.get('name')):
+            continue
+        try:
+            due.append(moment(shop['nextChangeAt']))
+        except (KeyError, ValueError, TypeError, AttributeError):
+            continue
+    return min(due) if due else None
+
+
+def fresh(data, now=None, job=None):
+    now = now or datetime.now(timezone.utc)
     try:
-        age = ((now or datetime.now(timezone.utc)) - moment(data['updatedAt'])).total_seconds()
-        return -60 <= age <= 180
-    except (KeyError, ValueError, TypeError):
+        if (now - moment(data['updatedAt'])).total_seconds() < -60:
+            return False
+        due = next_change(data, job)
+        return due is not None and now <= due + UPDATE_GRACE
+    except (KeyError, ValueError, TypeError, AttributeError):
         return False
 
 
@@ -42,16 +58,33 @@ def fingerprint(items):
     return hashlib.sha256(json.dumps(rows).encode()).hexdigest()
 
 
-def render(data, job, threshold=None):
+def render(data, job, threshold=None, *, cached=False, now=None):
+    now = now or datetime.now(timezone.utc)
+    try:
+        updated = moment(data['updatedAt']).astimezone(KST).strftime('%m/%d %H:%M')
+    except (KeyError, ValueError, TypeError, AttributeError):
+        updated = '확인 불가'
+    due = next_change(data, job)
+    footer = '기린월드 제공'
+    if due:
+        footer += ' · 다음 갱신: ' + due.astimezone(KST).strftime('%m/%d %H:%M')
     items = [x for x in data['items'] if matching(job, x.get('shop'))]
     title = f'📈 {job} 변동상점'
     if not items:
-        return [discord.Embed(title=title, description='아직 이 직업의 시세 데이터가 제공되지 않습니다.', color=0xcdb7e9)]
+        description = ('⚠️ 조회에 실패했고, 마지막으로 받은 자료에도 이 직업의 시세가 없습니다.'
+                       if cached else '현재 공식 사이트에서 이 직업의 변동 시세를 제공하지 않습니다.')
+        embed = discord.Embed(title=title, description=description, color=0xcdb7e9)
+        embed.set_footer(text=f'시세 갱신: {updated} KST · 기린월드 제공')
+        return [embed]
     rising = sorted((x for x in items if x['price'] > x['basePrice']),
                     key=lambda x: x['changePercent'], reverse=True)
-    lines = []
-    if not fresh(data):
-        lines += ['⚠️ 오래된 시세입니다. 현재 판매가는 게임에서 확인해 주세요.', '']
+    lines = [f'🕒 시세 갱신: {updated} KST', '']
+    if cached:
+        lines += ['⚠️ 조회에 실패해 마지막으로 받은 시세를 표시합니다. 현재 판매가는 게임에서 확인해 주세요.', '']
+    elif due is not None and now > due + UPDATE_GRACE:
+        lines += ['⚠️ 예정된 갱신 시각이 지나 이전 시세를 표시합니다. 현재 판매가는 게임에서 확인해 주세요.', '']
+    elif updated == '확인 불가' or (moment(data['updatedAt']) - now).total_seconds() > 60:
+        lines += ['⚠️ 공식 데이터의 갱신 시각을 확인할 수 없습니다.', '']
     high = [x for x in rising if threshold is not None and x['changePercent'] >= threshold]
     recommended = [x for x in rising if x not in high]
     for heading, rows in [('🔥 고점', high), ('⭐ 상승 품목', recommended)]:
@@ -80,7 +113,7 @@ def render(data, job, threshold=None):
     embeds = []
     for n, text in enumerate(chunks):
         e = discord.Embed(title=title + (f' ({n+1}/{len(chunks)})' if len(chunks)>1 else ''), description=text, color=0xcdb7e9)
-        e.set_footer(text=f"시세 기준: {data.get('updatedAt', '알 수 없음')} KST · 기린월드 제공")
+        e.set_footer(text=footer)
         embeds.append(e)
     return embeds
 
@@ -160,16 +193,16 @@ class Market:
 
     async def lookup(self, interaction, job):
         await interaction.response.defer(thinking=True)
+        cached = False
         try:
             data = await self.fetch()
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError):
             if self.data is None:
                 await interaction.followup.send('시세 사이트에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.')
                 return
-            await interaction.followup.send('⚠️ 연결 실패로 마지막으로 받은 시세를 표시합니다.')
-            data = dict(self.data)
-            data['updatedAt'] = self.data['updatedAt']
-        for embed in render(data, job, self.threshold(interaction.guild_id, job)):
+            cached = True
+            data = self.data
+        for embed in render(data, job, self.threshold(interaction.guild_id, job), cached=cached):
             await interaction.followup.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     def register(self):
@@ -261,10 +294,10 @@ class Market:
             if not settings:
                 return
             data = await self.fetch()
-            if not fresh(data):
-                return  # 오픈 전/사이트 정지 시 오래된 시각으로 알림을 보내지 않습니다.
             now = datetime.now(timezone.utc)
             for job in JOBS:
+                if not fresh(data, now, job):
+                    continue  # 해당 직업의 다음 갱신 시각을 기준으로 판단합니다.
                 shop = next((s for s in data['shops'] if matching(job,s.get('name'))),None)
                 if not shop:
                     continue

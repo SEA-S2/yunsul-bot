@@ -48,15 +48,19 @@ class MarketTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('🔥 고점',text)
         self.assertIn('밀 [일반]',text)
         self.assertNotIn('호박',text)
-        self.assertIn('아직',render(fixture(),'광부')[0].description)
+        self.assertIn('현재 공식 사이트',render(fixture(),'광부')[0].description)
         self.assertNotIn('🔥 고점',render(fixture(),'농부')[0].description)
 
     async def test_stale_and_future_data(self):
         data=fixture()
         self.assertTrue(fresh(data))
         data['updatedAt']=(datetime.now(timezone.utc)-timedelta(hours=1)).isoformat()
+        self.assertTrue(fresh(data))  # 시세가 바뀔 예정 시각 전이면 정상
+        self.assertNotIn('⚠️',render(data,'농부')[0].description)
+        self.assertIn('시세 갱신:',render(data,'농부')[0].description)
+        data['shops'][0]['nextChangeAt']=(datetime.now(timezone.utc)-timedelta(minutes=3)).isoformat()
         self.assertFalse(fresh(data))
-        self.assertIn('오래된',render(data,'농부')[0].description)
+        self.assertIn('예정된 갱신',render(data,'농부')[0].description)
         data['updatedAt']=(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat()
         self.assertFalse(fresh(data))
 
@@ -85,9 +89,46 @@ class MarketTests(unittest.IsolatedAsyncioTestCase):
         finally:
             c.bot.get_channel=original
         data['updatedAt']='2020-01-01 00:00:00'
+        data['shops'][0]['nextChangeAt']='2020-01-01T01:00:00+09:00'
         self.market.emit=AsyncMock()
         await self.market.poll.coro(self.market)
         self.market.emit.assert_not_called()
+
+    async def test_kst_deadline_grace_and_job_scope(self):
+        now=datetime(2026,11,22,1,0,tzinfo=timezone(timedelta(hours=9)))
+        data=fixture()
+        data['updatedAt']='2026-11-22 00:00:02'
+        data['shops']=[{'name':'농부 상점','nextChangeAt':'2026-11-21T18:00:00Z'},
+                       {'name':'연금술사 상점','nextChangeAt':'2026-11-21T14:00:00Z'}]
+        self.assertTrue(fresh(data,now,job='농부'))
+        self.assertFalse(fresh(data,now,job='연금'))
+        self.assertNotIn('⚠️',render(data,'농부',now=now)[0].description)
+        data['shops'][0]['nextChangeAt']=now.isoformat()
+        self.assertTrue(fresh(data,now+timedelta(minutes=2),job='농부'))
+        self.assertFalse(fresh(data,now+timedelta(minutes=2,seconds=1),job='농부'))
+
+    async def test_cached_lookup_preserves_timestamp_and_no_double_warning(self):
+        self.market.data=fixture()
+        self.market.data['updatedAt']='2026-11-22 00:00:02'
+        self.market.fetch=AsyncMock(side_effect=ValueError('site unavailable'))
+        interaction=SimpleNamespace(guild_id=1,response=SimpleNamespace(defer=AsyncMock()),
+                                    followup=SimpleNamespace(send=AsyncMock()))
+        await self.market.lookup(interaction,'농부')
+        interaction.followup.send.assert_awaited_once()
+        embed=interaction.followup.send.call_args.kwargs['embed']
+        self.assertIn('11/22 00:00',embed.description)
+        self.assertIn('조회에 실패',embed.description)
+        self.assertEqual(embed.description.count('⚠️'),1)
+
+    async def test_unknown_schedule_or_missing_job_does_not_guess_future_support(self):
+        data=fixture()
+        data['shops'][0]['nextChangeAt']=None
+        self.assertFalse(fresh(data,job='농부'))
+        self.assertNotIn('오래된',render(data,'농부')[0].description)
+        missing=render(data,'목수')[0].description
+        self.assertIn('현재 공식 사이트',missing)
+        self.assertNotIn('아직',missing)
+        self.assertIn('조회에 실패',render(data,'목수',cached=True)[0].description)
 
     async def test_cleanup_scope_bots_replies_and_permissions(self):
         msg=SimpleNamespace(guild=SimpleNamespace(id=1,me=object()),
