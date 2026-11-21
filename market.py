@@ -92,7 +92,7 @@ def render(data, job, threshold=None, *, cached=False, now=None):
             continue
         lines.append(heading)
         for x in rows:
-            name = discord.utils.escape_markdown(str(x['name']))
+            name = discord.utils.escape_markdown(str(x['name']).lstrip('𠀐𠀑𠀒 '))
             grade = discord.utils.escape_markdown(str(x.get('grade') or '등급 없음'))
             lines.append(f"• {name} [{grade}] · **{x['price']:,} {x.get('currency', '')}** · +{x['changePercent']:g}%")
         lines.append('')
